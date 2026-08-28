@@ -105,7 +105,7 @@ Grants authenticated Discord users full access to Agent Zero. Disabled by defaul
 
 ## Known Behaviors
 
-1. **Chat bridge requires channel registration** — The bridge connects to Discord but only responds in channels you explicitly add. Starting the bridge alone is not enough — you must also tell the agent: "Add channel YOUR_CHANNEL_ID to the chat bridge." The **Servers** allowlist in config controls which servers the *tools* can access; it does not affect the bridge.
+1. **Chat bridge requires channel registration** — The bridge connects to Discord but only responds in channels you explicitly add. Starting the bridge alone is not enough — you must also tell the agent: "Add channel YOUR_CHANNEL_ID to the chat bridge." When the **Servers** allowlist is configured, the channel's actual Discord guild must also be allowed.
 2. **First poll returns no alerts** — The initial `discord_poll check` sets the baseline message ID. Only messages posted *after* the first poll are detected.
 3. **Chat bridge requires bot token** — User tokens cannot use Discord's Gateway (WebSocket). The bridge will not start without a bot token configured.
 3. **Config changes require restart** — After editing config.json directly, restart Agent Zero: `supervisorctl restart run_ui`. WebUI settings changes via the Save button take effect immediately.

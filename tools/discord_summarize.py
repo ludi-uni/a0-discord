@@ -3,7 +3,7 @@ from pathlib import Path
 from helpers.tool import Tool, Response
 from usr.plugins.discord.helpers.discord_client import (
     DiscordClient, DiscordAPIError, format_messages, get_discord_config,
-    get_modes_to_try,
+    get_modes_to_try, normalize_allowed_servers, require_allowed_guild,
 )
 from usr.plugins.discord.helpers.sanitize import require_auth, truncate_bulk, clamp_limit
 
@@ -68,25 +68,24 @@ class DiscordSummarize(Tool):
         except ValueError as e:
             return Response(message=f"Auth error: {e}", break_loop=False)
 
-        # Server allowlist check
-        allowed_servers = config.get("servers", [])
-        if allowed_servers and guild_id and guild_id not in allowed_servers:
-            return Response(message=f"Error: Server {guild_id} is not in the allowed servers list.", break_loop=False)
+        allowed_servers = normalize_allowed_servers(config.get("servers", []))
 
         explicit_mode = self.args.get("mode", "")
         modes = get_modes_to_try(config, explicit_mode or None)
 
         last_error = None
         for mode in modes:
+            client = None
             try:
                 client = DiscordClient.from_config(agent=self.agent, mode=mode)
 
                 channel_info = await client.get_channel(target_id)
+                require_allowed_guild(channel_info.get("guild_id"), allowed_servers)
                 channel_name = channel_info.get("name", target_id)
+                actual_guild_id = str(channel_info.get("guild_id") or "")
 
                 self.set_progress("Fetching messages...")
                 messages = await client.get_all_channel_messages(channel_id=target_id, limit=limit)
-                await client.close()
 
                 if not messages:
                     return Response(message=f"No messages found in #{channel_name}.", break_loop=False)
@@ -108,7 +107,7 @@ class DiscordSummarize(Tool):
                 if save_to_memory:
                     self.set_progress("Saving to memory...")
                     timestamp = time.strftime("%Y-%m-%d %H:%M", time.gmtime())
-                    guild_label = f" (guild: {guild_id})" if guild_id else ""
+                    guild_label = f" (guild: {actual_guild_id})" if actual_guild_id else ""
                     memory_text = (
                         f"Discord Summary - #{channel_name}{guild_label} "
                         f"[{timestamp}, {len(messages)} messages]\n\n{summary}"
@@ -119,17 +118,21 @@ class DiscordSummarize(Tool):
                 suffix = "\n\n[Saved to memory]" if save_to_memory else ""
                 return Response(message=f"{header}\n\n{summary}{suffix}", break_loop=False)
 
+            except PermissionError as e:
+                return Response(message=f"Error: {e}", break_loop=False)
             except DiscordAPIError as e:
-                try:
-                    await client.close()
-                except Exception:
-                    pass
                 last_error = e
                 if e.status == 403 and mode != modes[-1]:
                     continue
                 return Response(message=f"Discord API error: {e}", break_loop=False)
             except Exception as e:
                 return Response(message=f"Error summarizing: {e}", break_loop=False)
+            finally:
+                if client is not None:
+                    try:
+                        await client.close()
+                    except Exception:
+                        pass
 
         return Response(message=f"Discord API error: {last_error}", break_loop=False)
 

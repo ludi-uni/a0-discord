@@ -1,7 +1,8 @@
 from helpers.tool import Tool, Response
 from usr.plugins.discord.helpers.discord_client import (
     DiscordClient, DiscordAPIError, format_messages, get_discord_config,
-    get_modes_to_try,
+    get_modes_to_try, normalize_allowed_servers, require_allowed_guild,
+    require_allowed_target,
 )
 from usr.plugins.discord.helpers.sanitize import require_auth, sanitize_channel_name
 
@@ -22,30 +23,29 @@ class DiscordRead(Tool):
             require_auth(config)
         except ValueError as e:
             return Response(message=f"Auth error: {e}", break_loop=False)
-        allowed_servers = config.get("servers", [])
+        allowed_servers = normalize_allowed_servers(config.get("servers", []))
         explicit_mode = self.args.get("mode", "")
         modes = get_modes_to_try(config, explicit_mode or None)
 
         last_error = None
         for mode in modes:
+            client = None
             try:
                 client = DiscordClient.from_config(agent=self.agent, mode=mode)
 
                 if action == "channels":
                     if not guild_id:
                         return Response(message="Error: guild_id is required for listing channels.", break_loop=False)
-                    if allowed_servers and guild_id not in allowed_servers:
-                        return Response(message=f"Error: Server {guild_id} is not in the allowed servers list.", break_loop=False)
+                    require_allowed_guild(guild_id, allowed_servers)
                     channels = await client.get_guild_channels(guild_id)
-                    await client.close()
                     return Response(message=_format_channels(channels), break_loop=False)
 
                 elif action == "threads":
                     if not guild_id:
                         return Response(message="Error: guild_id is required for listing threads.", break_loop=False)
+                    require_allowed_guild(guild_id, allowed_servers)
                     threads_data = await client.get_active_threads(guild_id)
                     threads = threads_data.get("threads", [])
-                    await client.close()
                     return Response(message=_format_threads(threads), break_loop=False)
 
                 elif action == "messages":
@@ -53,10 +53,10 @@ class DiscordRead(Tool):
                     if not target_id:
                         return Response(message="Error: channel_id or thread_id is required.", break_loop=False)
 
+                    await require_allowed_target(client, target_id, allowed_servers)
                     messages = await client.get_all_channel_messages(
                         channel_id=target_id, limit=limit, after=after_id or None,
                     )
-                    await client.close()
 
                     if not messages:
                         return Response(message="No messages found in the specified channel/thread.", break_loop=False)
@@ -68,17 +68,21 @@ class DiscordRead(Tool):
                 else:
                     return Response(message=f"Unknown action '{action}'. Use 'messages', 'channels', or 'threads'.", break_loop=False)
 
+            except PermissionError as e:
+                return Response(message=f"Error: {e}", break_loop=False)
             except DiscordAPIError as e:
-                try:
-                    await client.close()
-                except Exception:
-                    pass
                 last_error = e
                 if e.status == 403 and mode != modes[-1]:
                     continue  # Try next mode (e.g., user token fallback)
                 return Response(message=f"Discord API error: {e}", break_loop=False)
             except Exception as e:
                 return Response(message=f"Error reading Discord: {e}", break_loop=False)
+            finally:
+                if client is not None:
+                    try:
+                        await client.close()
+                    except Exception:
+                        pass
 
         return Response(message=f"Discord API error: {last_error}", break_loop=False)
 

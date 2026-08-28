@@ -34,6 +34,12 @@ version: 1.1.0
 
 ## Changelog
 
+### v1.1.1 — 2026-08-28 (fork patch, unreleased)
+- Restricted and elevated import failures now fail closed without an HTTP full-agent fallback.
+- Elevated mode uses the current `helpers.messages.UserMessage` import path.
+- Server allowlists are enforced against actual Discord channel/thread guild ownership across read, write, summary, insights, polling, and chat bridge paths.
+- Added security boundary regression tests covering import failure, ownership mismatch, guild-less resources, ID normalization, and client cleanup.
+
 ### v1.1.0 — 2026-03-25
 Standards conformance release.
 - **config.html**: Migrated to A0's standard Alpine.js `x-model` settings framework (removes custom fetchApi/save logic)

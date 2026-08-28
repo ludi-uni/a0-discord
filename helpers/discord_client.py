@@ -7,6 +7,33 @@ from typing import Optional
 DISCORD_API_BASE = "https://discord.com/api/v10"
 
 
+def normalize_allowed_servers(servers) -> set[str]:
+    """Normalize configured guild IDs for authorization comparisons."""
+    return {str(server_id) for server_id in (servers or []) if server_id is not None}
+
+
+def require_allowed_guild(guild_id, allowed_servers) -> None:
+    """Deny guild-scoped access when a configured allowlist does not match."""
+    allowed = normalize_allowed_servers(allowed_servers)
+    if not allowed:
+        return
+
+    actual_guild_id = str(guild_id or "")
+    if not actual_guild_id or actual_guild_id not in allowed:
+        raise PermissionError("Target is not in the allowed servers list.")
+
+
+async def require_allowed_target(client, target_id: str, allowed_servers) -> Optional[dict]:
+    """Resolve a channel/thread's actual guild before allowing resource access."""
+    allowed = normalize_allowed_servers(allowed_servers)
+    if not allowed:
+        return None
+
+    channel = await client.get_channel(target_id)
+    require_allowed_guild(channel.get("guild_id"), allowed)
+    return channel
+
+
 def get_discord_config(agent=None):
     """Load Discord config through the plugin framework with env var overrides."""
     try:

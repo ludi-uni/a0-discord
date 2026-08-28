@@ -374,6 +374,15 @@ class ChatBridgeBot(discord.Client):
 
         # User allowlist: silently ignore users not on the list
         config = self._get_config()
+        from usr.plugins.discord.helpers.discord_client import require_allowed_guild
+
+        try:
+            actual_guild_id = getattr(getattr(message, "guild", None), "id", None)
+            require_allowed_guild(actual_guild_id, config.get("servers", []))
+        except PermissionError:
+            logger.warning("Ignoring Discord bridge message from a disallowed server")
+            return
+
         allowed_users = config.get("chat_bridge", {}).get("allowed_users", [])
         if allowed_users and str(message.author.id) not in [str(u) for u in allowed_users]:
             return
@@ -503,10 +512,8 @@ class ChatBridgeBot(discord.Client):
             return response if isinstance(response, str) else str(response)
 
         except ImportError:
-            # Fallback: use HTTP API if in-process imports aren't available
-            # WARNING: HTTP fallback routes through the full agent loop and is
-            # less secure. It should only be used when A0 imports are unavailable.
-            return await self._get_agent_response_http(channel_id, text)
+            logger.exception("Restricted Discord bridge dependencies unavailable")
+            return "Restricted chat is temporarily unavailable."
 
     # ------------------------------------------------------------------
     # Elevated mode: full agent loop with tools (authenticated users only)
@@ -519,7 +526,8 @@ class ChatBridgeBot(discord.Client):
         The caller (_on_message) verifies elevation status before calling this.
         """
         try:
-            from agent import AgentContext, AgentContextType, UserMessage
+            from agent import AgentContext, AgentContextType
+            from helpers.messages import UserMessage
             from initialize import initialize_agent
 
             # Get or create a context for this channel
@@ -563,7 +571,7 @@ class ChatBridgeBot(discord.Client):
                     except Exception:
                         pass
 
-            user_msg = UserMessage(message=prefixed_text, attachments=attachment_paths)
+            user_msg = UserMessage(prefixed_text, attachment_paths)
             task = context.communicate(user_msg)
             result = await task.result()
 
@@ -573,7 +581,8 @@ class ChatBridgeBot(discord.Client):
             return result if isinstance(result, str) else str(result)
 
         except ImportError:
-            return await self._get_agent_response_http(channel_id, text)
+            logger.exception("Elevated Discord bridge dependencies unavailable")
+            return "Elevated chat is temporarily unavailable."
 
     def _cleanup_temp_files(self):
         """Remove temporary image files created during message processing."""
@@ -584,47 +593,6 @@ class ChatBridgeBot(discord.Client):
             except OSError:
                 remaining.append(path)
         self._temp_files = remaining
-
-    # ------------------------------------------------------------------
-    # HTTP fallback
-    # ------------------------------------------------------------------
-
-    async def _get_agent_response_http(self, channel_id: str, text: str) -> str:
-        """Fallback: route through Agent Zero's HTTP API."""
-        import aiohttp
-        from usr.plugins.discord.helpers.discord_client import get_discord_config
-
-        config = get_discord_config()
-        api_port = config.get("chat_bridge", {}).get("api_port", 80)
-        api_key = config.get("chat_bridge", {}).get("api_key", "")
-
-        context_id = get_context_id(channel_id) or ""
-
-        async with aiohttp.ClientSession() as session:
-            payload = {
-                "message": text,
-                "context_id": context_id,
-            }
-            headers = {"Content-Type": "application/json"}
-            if api_key:
-                headers["X-API-KEY"] = api_key
-
-            async with session.post(
-                f"http://localhost:{api_port}/api/api_message",
-                json=payload,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=300),
-            ) as resp:
-                if resp.status != 200:
-                    body = await resp.text()
-                    return f"Agent API error ({resp.status}): {body}"
-                data = await resp.json()
-
-                # Store context ID for conversation continuity
-                if data.get("context_id"):
-                    set_context_id(channel_id, data["context_id"])
-
-                return data.get("response", "No response from agent.")
 
     # ------------------------------------------------------------------
     # Response sending

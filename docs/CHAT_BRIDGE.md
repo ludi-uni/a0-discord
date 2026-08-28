@@ -52,7 +52,9 @@ The chat bridge is designed with a **defense-in-depth** approach. Multiple indep
 
 ### Privilege Isolation (Architectural)
 
-By default, the chat bridge operates in **restricted mode**: Discord messages are processed via a direct LLM call (`call_utility_model`) that has zero access to Agent Zero's tools, code execution, file system, or any other system resources. This isolation is enforced at the code level, not through prompt instructions -- even a successful prompt injection cannot escalate privileges in restricted mode.
+By default, the chat bridge operates in **restricted mode**: Discord messages are processed via a direct LLM call (`call_utility_model`) that has zero access to Agent Zero's tools, code execution, file system, or any other system resources. This isolation is enforced at the code level, not through prompt instructions -- even a successful prompt injection cannot escalate privileges in restricted mode. If the direct model path cannot be imported, the bridge returns a generic unavailable response and fails closed; it never falls back to the full Agent Zero HTTP API.
+
+When the server allowlist is populated, registered bridge channels and incoming messages must belong to an allowed guild. Channel ownership is resolved from Discord when a channel is registered, and the incoming message's actual guild is checked again at runtime. Guild-less resources are denied while the allowlist is enabled.
 
 ### User Allowlist (Access Control)
 
@@ -478,8 +480,8 @@ If multiple messages arrive while one is being processed, they queue up and are 
 **`ChatBridgeBot(discord.Client)`** -- The bot itself:
 - `on_ready()` -- Logs when connected (uses discord.py's built-in ready state)
 - `on_message()` -- Routes messages from designated channels to Agent Zero
-- `_get_agent_response()` -- In-process routing via `initialize_agent()` + `AgentContext.communicate()`
-- `_get_agent_response_http()` -- HTTP fallback via `POST /api/api_message`
+- `_get_agent_response()` -- Restricted in-process routing via `call_utility_model()` with no tools
+- `_get_elevated_response()` -- Authenticated full-agent routing via `AgentContext.communicate()`
 - `_send_response()` -- Sends (potentially split) responses back to Discord
 - `wait_until_ready_timeout()` -- Waits for Gateway connection with timeout (uses discord.py's built-in `wait_until_ready()`)
 

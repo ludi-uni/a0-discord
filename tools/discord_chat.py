@@ -1,5 +1,8 @@
 from helpers.tool import Tool, Response
-from usr.plugins.discord.helpers.discord_client import get_discord_config
+from usr.plugins.discord.helpers.discord_client import (
+    DiscordClient, DiscordAPIError, get_discord_config,
+    normalize_allowed_servers, require_allowed_target,
+)
 from usr.plugins.discord.helpers.discord_bot import (
     start_chat_bridge,
     stop_chat_bridge,
@@ -29,7 +32,7 @@ class DiscordChat(Tool):
         elif action == "stop":
             return await self._stop()
         elif action == "add_channel":
-            return self._add_channel()
+            return await self._add_channel()
         elif action == "remove_channel":
             return self._remove_channel()
         elif action == "list":
@@ -92,7 +95,7 @@ class DiscordChat(Tool):
         except Exception as e:
             return Response(message=f"Error stopping chat bridge: {type(e).__name__}", break_loop=False)
 
-    def _add_channel(self) -> Response:
+    async def _add_channel(self) -> Response:
         """Add a channel to the chat bridge."""
         channel_id = self.args.get("channel_id", "")
         guild_id = self.args.get("guild_id", "")
@@ -102,6 +105,27 @@ class DiscordChat(Tool):
             channel_id = validate_snowflake(channel_id, "channel_id")
         except ValueError as e:
             return Response(message=f"Error: {e}", break_loop=False)
+
+        config = get_discord_config(self.agent)
+        allowed_servers = normalize_allowed_servers(config.get("servers", []))
+        client = None
+        try:
+            if allowed_servers:
+                client = DiscordClient.from_config(agent=self.agent, mode="bot")
+                channel = await require_allowed_target(client, channel_id, allowed_servers)
+                guild_id = str(channel.get("guild_id") or "")
+        except PermissionError as e:
+            return Response(message=f"Error: {e}", break_loop=False)
+        except DiscordAPIError as e:
+            return Response(message=f"Discord API error: {e}", break_loop=False)
+        except Exception as e:
+            return Response(message=f"Error adding chat channel: {type(e).__name__}", break_loop=False)
+        finally:
+            if client is not None:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
 
         add_chat_channel(channel_id, guild_id, label)
         msg = f"Channel {channel_id} added to chat bridge"
