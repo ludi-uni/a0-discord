@@ -24,7 +24,7 @@ import usr.plugins.discord.tools.discord_summarize as discord_summarize_module
 
 
 class _UserMessage:
-    def __init__(self, message, attachments=None, /):
+    def __init__(self, *, message, attachments=None):
         self.message = message
         self.attachments = attachments or []
 
@@ -151,7 +151,7 @@ class ChatBridgeFailClosedTests(unittest.IsolatedAsyncioTestCase):
         aiohttp_module.ClientSession.assert_not_called()
         log_exception.assert_called_once()
 
-    async def test_elevated_uses_current_helpers_messages_user_message(self):
+    async def test_elevated_uses_agent_user_message_and_communicates(self):
         context = _Context()
 
         class AgentContext:
@@ -162,9 +162,7 @@ class ChatBridgeFailClosedTests(unittest.IsolatedAsyncioTestCase):
         agent_module = types.ModuleType("agent")
         agent_module.AgentContext = AgentContext
         agent_module.AgentContextType = SimpleNamespace(USER="user")
-
-        messages_module = types.ModuleType("helpers.messages")
-        messages_module.UserMessage = _UserMessage
+        agent_module.UserMessage = _UserMessage
 
         initialize_module = types.ModuleType("initialize")
         initialize_module.initialize_agent = lambda: object()
@@ -178,7 +176,6 @@ class ChatBridgeFailClosedTests(unittest.IsolatedAsyncioTestCase):
                 sys.modules,
                 {
                     "agent": agent_module,
-                    "helpers.messages": messages_module,
                     "initialize": initialize_module,
                     "aiohttp": aiohttp_module,
                 },

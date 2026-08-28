@@ -526,8 +526,7 @@ class ChatBridgeBot(discord.Client):
         The caller (_on_message) verifies elevation status before calling this.
         """
         try:
-            from agent import AgentContext, AgentContextType
-            from helpers.messages import UserMessage
+            from agent import AgentContext, AgentContextType, UserMessage
             from initialize import initialize_agent
 
             # Get or create a context for this channel
@@ -571,7 +570,10 @@ class ChatBridgeBot(discord.Client):
                     except Exception:
                         pass
 
-            user_msg = UserMessage(prefixed_text, attachment_paths)
+            user_msg = UserMessage(
+                message=prefixed_text,
+                attachments=attachment_paths,
+            )
             task = context.communicate(user_msg)
             result = await task.result()
 
