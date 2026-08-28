@@ -5,7 +5,7 @@ from pathlib import Path
 from helpers.tool import Tool, Response
 from usr.plugins.discord.helpers.discord_client import (
     DiscordClient, DiscordAPIError, format_messages, get_discord_config,
-    get_modes_to_try,
+    get_modes_to_try, normalize_allowed_servers, require_allowed_target,
 )
 from usr.plugins.discord.helpers.poll_state import (
     get_last_message_id, set_last_message_id, record_alert,
@@ -30,7 +30,7 @@ class DiscordPoll(Tool):
         if action == "check":
             return await self._check_channels()
         elif action == "watch":
-            return self._add_watch()
+            return await self._add_watch()
         elif action == "unwatch":
             return self._remove_watch()
         elif action == "list":
@@ -50,6 +50,7 @@ class DiscordPoll(Tool):
             require_auth(config)
         except ValueError as e:
             return Response(message=f"Auth error: {e}", break_loop=False)
+        allowed_servers = normalize_allowed_servers(config.get("servers", []))
 
         channel_id = self.args.get("channel_id", "")
         watches = get_watch_channels()
@@ -72,10 +73,12 @@ class DiscordPoll(Tool):
 
         last_error = None
         for mode in modes:
+            client = None
             try:
                 client = DiscordClient.from_config(agent=self.agent, mode=mode)
 
                 for ch_id, ch_config in watches.items():
+                    await require_allowed_target(client, ch_id, allowed_servers)
                     last_id = get_last_message_id(ch_id)
                     owner_id = ch_config.get("owner_id", "")
                     label = ch_config.get("label", ch_id)
@@ -158,20 +161,23 @@ class DiscordPoll(Tool):
                     # Update last seen
                     set_last_message_id(ch_id, messages[0]["id"])  # messages[0] is newest
 
-                await client.close()
                 break  # Success — don't try next mode
 
+            except PermissionError as e:
+                return Response(message=f"Error: {e}", break_loop=False)
             except DiscordAPIError as e:
-                try:
-                    await client.close()
-                except Exception:
-                    pass
                 last_error = e
                 if e.status == 403 and mode != modes[-1]:
                     continue
                 return Response(message=f"Discord API error during poll: {e}", break_loop=False)
             except Exception as e:
                 return Response(message=f"Error during poll: {e}", break_loop=False)
+            finally:
+                if client is not None:
+                    try:
+                        await client.close()
+                    except Exception:
+                        pass
 
         if not all_alerts:
             return Response(message="No new alerts found.", break_loop=False)
@@ -260,7 +266,7 @@ class DiscordPoll(Tool):
         except Exception:
             return False
 
-    def _add_watch(self) -> Response:
+    async def _add_watch(self) -> Response:
         channel_id = self.args.get("channel_id", "")
         guild_id = self.args.get("guild_id", "")
         label = self.args.get("label", "")
@@ -272,6 +278,33 @@ class DiscordPoll(Tool):
                 owner_id = validate_snowflake(owner_id, "owner_id")
         except ValueError as e:
             return Response(message=f"Error: {e}", break_loop=False)
+
+        config = get_discord_config(self.agent)
+        try:
+            require_auth(config)
+        except ValueError as e:
+            return Response(message=f"Auth error: {e}", break_loop=False)
+
+        allowed_servers = normalize_allowed_servers(config.get("servers", []))
+        client = None
+        try:
+            if allowed_servers:
+                mode = get_modes_to_try(config, self.args.get("mode", "") or None)[0]
+                client = DiscordClient.from_config(agent=self.agent, mode=mode)
+                channel = await require_allowed_target(client, channel_id, allowed_servers)
+                guild_id = str(channel.get("guild_id") or "")
+        except PermissionError as e:
+            return Response(message=f"Error: {e}", break_loop=False)
+        except DiscordAPIError as e:
+            return Response(message=f"Discord API error: {e}", break_loop=False)
+        except Exception as e:
+            return Response(message=f"Error adding Discord watch: {e}", break_loop=False)
+        finally:
+            if client is not None:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
 
         add_watch_channel(channel_id, guild_id, label, owner_id)
         msg = f"Now watching channel {channel_id}"

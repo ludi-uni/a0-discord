@@ -1,6 +1,7 @@
 from helpers.tool import Tool, Response
 from usr.plugins.discord.helpers.discord_client import (
     DiscordClient, DiscordAPIError, get_discord_config, get_modes_to_try,
+    normalize_allowed_servers, require_allowed_guild,
 )
 from usr.plugins.discord.helpers.persona_registry import (
     upsert_user, get_user, search_users, get_guild_users,
@@ -24,6 +25,13 @@ class DiscordMembers(Tool):
             require_auth(config)
         except ValueError as e:
             return Response(message=f"Auth error: {e}", break_loop=False)
+
+        allowed_servers = normalize_allowed_servers(config.get("servers", []))
+        try:
+            if guild_id:
+                require_allowed_guild(guild_id, allowed_servers)
+        except PermissionError as e:
+            return Response(message=f"Error: {e}", break_loop=False)
 
         try:
             if action == "list":

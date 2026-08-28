@@ -1,6 +1,7 @@
 from helpers.tool import Tool, Response
 from usr.plugins.discord.helpers.discord_client import (
     DiscordClient, DiscordAPIError, get_discord_config,
+    normalize_allowed_servers, require_allowed_target,
 )
 from usr.plugins.discord.helpers.sanitize import require_auth, validate_snowflake
 
@@ -30,8 +31,11 @@ class DiscordSend(Tool):
                 break_loop=False,
             )
 
+        allowed_servers = normalize_allowed_servers(config.get("servers", []))
+        client = None
         try:
             client = DiscordClient.from_config(agent=self.agent, mode="bot")
+            await require_allowed_target(client, channel_id, allowed_servers)
 
             if action == "send":
                 if not content:
@@ -44,7 +48,6 @@ class DiscordSend(Tool):
                     result = await client.send_message(channel_id=channel_id, content=chunk, reply_to=ref)
                     sent_ids.append(result["id"])
 
-                await client.close()
                 if len(sent_ids) == 1:
                     return Response(message=f"Message sent (ID: {sent_ids[0]}).", break_loop=False)
                 return Response(message=f"Message sent in {len(sent_ids)} parts (IDs: {', '.join(sent_ids)}).", break_loop=False)
@@ -55,7 +58,6 @@ class DiscordSend(Tool):
                 if not emoji or not message_id:
                     return Response(message="Error: emoji and message_id required for reactions.", break_loop=False)
                 await client.add_reaction(channel_id, message_id, emoji)
-                await client.close()
                 return Response(message=f"Reaction {emoji} added to message {message_id}.", break_loop=False)
 
             else:
@@ -67,6 +69,12 @@ class DiscordSend(Tool):
             return Response(message=f"Discord API error: {e}", break_loop=False)
         except Exception as e:
             return Response(message=f"Error sending to Discord: {type(e).__name__}", break_loop=False)
+        finally:
+            if client is not None:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
 
 
 def _split_message(content: str, max_length: int = 2000) -> list[str]:

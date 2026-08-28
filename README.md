@@ -190,13 +190,13 @@ This plugin has been security-hardened with multiple layers of defense. **Read t
 
 ### Core Protections
 
-- **Chat bridge privilege isolation** -- The chat bridge uses direct LLM calls (`call_utility_model`) instead of the full agent loop. In restricted mode (the default), Discord users have **zero access** to tools, code execution, file operations, or system resources. This is enforced architecturally, not by prompt instructions.
+- **Chat bridge privilege isolation** -- The chat bridge uses direct LLM calls (`call_utility_model`) instead of the full agent loop. In restricted mode (the default), Discord users have **zero access** to tools, code execution, file operations, or system resources. If the direct model path is unavailable, restricted execution fails closed and does not fall back to the full Agent Zero API.
 - **Prompt injection defense** -- Input sanitization with Unicode homoglyph normalization (NFKC), zero-width character stripping, and pattern-based injection detection.
 - **Snowflake ID validation** -- All Discord IDs are validated as 17-20 digit numbers before use in API calls.
 - **SSRF protection** -- Image downloads restricted to Discord CDN hosts only.
 - **Atomic file writes** -- State files written atomically with restrictive permissions (`0o600`).
 - **Per-user rate limiting** -- Sliding window rate limiter (10 messages per 60 seconds) on the chat bridge.
-- **Server allowlist enforcement** -- Configured server allowlists are checked consistently across all tools.
+- **Server allowlist enforcement** -- Configured server allowlists are checked against the actual guild ownership returned by Discord for channel and thread resources. Mismatched, guild-less, or unresolvable resources are denied before messages are read or written. The same check applies to polling and the chat bridge.
 - **Sanitized error messages** -- Internal details (file paths, stack traces) are never exposed to users.
 
 ### User Allowlist

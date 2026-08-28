@@ -51,6 +51,7 @@ The bot maintains separate conversation contexts per channel. Messages from Disc
 **Security layers:**
 - **User Allowlist**: When `chat_bridge.allowed_users` is populated, only listed Discord user IDs can interact with the bot. Unlisted users are silently ignored. Empty list = allow all.
 - **Restricted mode** (default): Direct LLM call with no tool access. Discord users can only chat conversationally.
+- **Server Allowlist**: When `servers` is populated, channel ownership is resolved from Discord and only channels in an allowed guild can be registered or used by the bridge.
 - **Elevated mode** (opt-in): Authenticated users get full Agent Zero access (tools, code execution, file access). Requires `allow_elevated: true` in chat bridge config and runtime authentication via `!auth <key>` in Discord.
 
 **Discord-side commands** (typed by users in the Discord channel):
